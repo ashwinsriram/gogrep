@@ -12,11 +12,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
+
+var wgGrep sync.WaitGroup
+var wgPrint sync.WaitGroup
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -69,6 +73,9 @@ func init() {
 }
 
 func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool) {
+	resChan := make(chan string)
+	guard := make(chan struct{}, 128)
+
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if !ignoreErrors {
@@ -76,17 +83,24 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 			}
 			return filepath.SkipDir
 		}
-		if info.IsDir() && (filepath.Base(path)[0] == '.' && !hidden) {
+		if info.IsDir() && (filepath.Base(path)[0] == '.' && !hidden) && filepath.Base(path) != "." {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && (hidden || filepath.Base(path)[0] != '.') {
-			grepSearch(search, path, binary)
+			wgGrep.Add(1)
+			wgPrint.Add(1)
+			guard <- struct{}{}
+			go recursiveGrep(search, path, binary, resChan, guard)
+			go recursivePrint(path, resChan)
 		}
 		return nil
 	})
 	if err != nil && !ignoreErrors {
 		log.Println("gogrep: ", err)
 	}
+	wgGrep.Wait()
+	wgPrint.Wait()
+	close(resChan)
 }
 
 //search for a string in a file and return the line number and line with the string highlighted
@@ -97,15 +111,10 @@ func grepSearch(search string, file string, binary bool) {
 	fileScanner := bufio.NewScanner(f)
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
-	firstMatch := true
 
 	for fileScanner.Scan() {
 		ln++
 		if strings.Contains(fileScanner.Text(), search) && (utf8.ValidString(fileScanner.Text()) || binary) {
-			if firstMatch {
-				color.Blue(file)
-				firstMatch = false
-			}
 			fmt.Printf("%v: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
@@ -117,5 +126,43 @@ func grepSearch(search string, file string, binary bool) {
 			}
 			fmt.Println()
 		}
+	}
+}
+
+func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}) {
+	defer wgGrep.Done()
+	defer func() { <-guard }()
+	//open the file
+	f, _ := os.Open(file)
+	fileScanner := bufio.NewScanner(f)
+	fileScanner.Split(bufio.ScanLines)
+	ln := 0
+	res := ""
+
+	for fileScanner.Scan() {
+		ln++
+		if strings.Contains(fileScanner.Text(), search) && (utf8.ValidString(fileScanner.Text()) || binary) {
+			res += fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln)))
+			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
+			numParts := len(line) - 1
+			for idx, part := range line {
+				res += fmt.Sprint(part)
+				if idx < numParts {
+					res += color.RedString(search)
+				}
+			}
+			res += "\n"
+		}
+	}
+	f.Close()
+	resChan <- res
+}
+
+func recursivePrint(path string, resChan chan string) {
+	defer wgPrint.Done()
+	res := <-resChan
+	if res != "" {
+		fmt.Println(color.GreenString(path))
+		fmt.Println(res)
 	}
 }
