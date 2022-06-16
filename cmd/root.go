@@ -37,10 +37,11 @@ to quickly create a Cobra application.`,
 		hidden, _ := cmd.Flags().GetBool("hidden")
 		binary, _ := cmd.Flags().GetBool("binary")
 		ignoreErrors, _ := cmd.Flags().GetBool("ignore-errors")
+		invert, _ := cmd.Flags().GetBool("invert")
 		if recursive {
-			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors)
+			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors,invert)
 		} else {
-			grepSearch(args[0], args[1], binary)
+			grepSearch(args[0], args[1], binary,invert)
 		}
 
 	},
@@ -68,9 +69,10 @@ func init() {
 	rootCmd.Flags().BoolP("hidden", ".", false, "Search hidden files")
 	rootCmd.Flags().BoolP("binary", "b", false, "Allow for non utf8 characters")
 	rootCmd.Flags().BoolP("ignore-errors", "i", false, "Ignore all errors")
+	rootCmd.Flags().BoolP("invert", "v", false, "Returns all lines that do not match the pattern")
 }
 
-func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool) {
+func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool) {
 	resChan := make(chan string)
 	guard := make(chan struct{}, 128)
 
@@ -88,7 +90,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 			wgGrep.Add(1)
 			wgPrint.Add(1)
 			guard <- struct{}{}
-			go recursiveGrep(search, path, binary, resChan, guard)
+			go recursiveGrep(search, path, binary, resChan, guard, invert)
 			go recursivePrint(path, resChan)
 		}
 		return nil
@@ -102,7 +104,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 }
 
 //search for a string in a file and return the line number and line with the string highlighted
-func grepSearch(search string, file string, binary bool) {
+func grepSearch(search string, file string, binary bool,invert bool) {
 	//open the file
 	f, _ := os.Open(file)
 	defer f.Close()
@@ -112,7 +114,7 @@ func grepSearch(search string, file string, binary bool) {
 
 	for fileScanner.Scan() {
 		ln++
-		if strings.Contains(fileScanner.Text(), search) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		if (strings.Contains(fileScanner.Text(), search) == !invert && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
 			fmt.Printf("%v: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
@@ -127,7 +129,7 @@ func grepSearch(search string, file string, binary bool) {
 	}
 }
 
-func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}) {
+func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}, invert bool) {
 	defer wgGrep.Done()
 	defer func() { <-guard }()
 	//open the file
@@ -135,11 +137,10 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 	fileScanner := bufio.NewScanner(f)
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
-	res := ""
-
+	res := color.GreenString(file) + "\n"
 	for fileScanner.Scan() {
 		ln++
-		if strings.Contains(fileScanner.Text(), search) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		if (strings.Contains(fileScanner.Text(), search) == !invert && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
 			res += fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
@@ -153,6 +154,11 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 		}
 	}
 	f.Close()
+	if len(strings.Split(res, "\n")) == 2 {
+		res = ""
+	} else {
+		res += "\n"
+	}
 	resChan <- res
 }
 
@@ -160,7 +166,6 @@ func recursivePrint(path string, resChan chan string) {
 	defer wgPrint.Done()
 	res := <-resChan
 	if res != "" {
-		fmt.Println(color.GreenString(path))
-		fmt.Println(res)
+		os.Stdout.Write([]byte(res))
 	}
 }
