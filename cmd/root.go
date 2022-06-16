@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,8 @@ to quickly create a Cobra application.`,
 		excludeExt, _ := cmd.Flags().GetStringSlice("exclude-ext")
 		ext, _ := cmd.Flags().GetStringSlice("ext")
 		excludeDir, _ := cmd.Flags().GetStringSlice("exclude-dir")
+		regex, _ := cmd.Flags().GetBool("regex")
+
 		excludeExtMap := make(map[string]bool)
 		for _, exclude := range excludeExt {
 			excludeExtMap[exclude] = true
@@ -55,9 +58,9 @@ to quickly create a Cobra application.`,
 			excludeDirMap[exclude] = true
 		}
 		if recursive {
-			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors, invert, excludeExtMap, extMap, excludeDirMap)
+			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors, invert, excludeExtMap, extMap, excludeDirMap, regex)
 		} else {
-			grepSearch(args[0], args[1], binary, invert)
+			grepSearch(args[0], args[1], binary, invert, regex)
 		}
 
 	},
@@ -89,9 +92,10 @@ func init() {
 	rootCmd.Flags().StringSliceP("exclude-ext", "X", []string{}, "Exclude extensions from the search. Only works in recursive mode")
 	rootCmd.Flags().StringSliceP("ext", "x", []string{}, "Only include certain extensions. Only works in recursive mode")
 	rootCmd.Flags().StringSliceP("exclude-dir", "D", []string{}, "Exclude directories from the search. Only works in recursive mode")
+	rootCmd.Flags().BoolP("regex", "e", false, "Use regex to search for a string")
 }
 
-func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool, extMap map[string]bool, excludeDirMap map[string]bool) {
+func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool, extMap map[string]bool, excludeDirMap map[string]bool, regex bool) {
 	resChan := make(chan string)
 	guard := make(chan struct{}, 128)
 
@@ -119,7 +123,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 			wgGrep.Add(1)
 			wgPrint.Add(1)
 			guard <- struct{}{}
-			go recursiveGrep(search, path, binary, resChan, guard, invert)
+			go recursiveGrep(search, path, binary, resChan, guard, invert, regex)
 			go recursivePrint(path, resChan)
 		}
 		return nil
@@ -133,7 +137,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 }
 
 //search for a string in a file and return the line number and line with the string highlighted
-func grepSearch(search string, file string, binary bool, invert bool) {
+func grepSearch(search string, file string, binary bool, invert bool, regex bool) {
 	//open the file
 	f, _ := os.Open(file)
 	defer f.Close()
@@ -141,9 +145,11 @@ func grepSearch(search string, file string, binary bool, invert bool) {
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
 
+	r, _ := regexp.Compile(search)
+
 	for fileScanner.Scan() {
 		ln++
-		if (strings.Contains(fileScanner.Text(), search) == !invert && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		if (((regex && r.MatchString(fileScanner.Text()) == !invert) || (!regex && strings.Contains(fileScanner.Text(), search) == !invert)) && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
 			fmt.Printf("%v: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
@@ -156,9 +162,10 @@ func grepSearch(search string, file string, binary bool, invert bool) {
 			fmt.Println()
 		}
 	}
+
 }
 
-func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}, invert bool) {
+func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}, invert bool, regex bool) {
 	defer wgGrep.Done()
 	defer func() { <-guard }()
 	//open the file
@@ -167,9 +174,11 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
 	res := color.GreenString(file) + "\n"
+	r, _ := regexp.Compile(search)
+
 	for fileScanner.Scan() {
 		ln++
-		if (strings.Contains(fileScanner.Text(), search) == !invert && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		if (((regex && r.MatchString(fileScanner.Text()) == !invert) || (!regex && strings.Contains(fileScanner.Text(), search) == !invert)) && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
 			res += fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
