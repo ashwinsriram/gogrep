@@ -39,13 +39,18 @@ to quickly create a Cobra application.`,
 		ignoreErrors, _ := cmd.Flags().GetBool("ignore-errors")
 		invert, _ := cmd.Flags().GetBool("invert")
 		excludeExt, _ := cmd.Flags().GetStringSlice("exclude-ext")
+		ext, _ := cmd.Flags().GetStringSlice("ext")
 		excludeExtMap := make(map[string]bool)
-		for _, ext := range excludeExt {
-			excludeExtMap[ext] = true
+		for _, exclude := range excludeExt {
+			excludeExtMap[exclude] = true
+		}
+		extMap := make(map[string]bool)
+		for _, e := range ext {
+			extMap[e] = true
 		}
 
 		if recursive {
-			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors,invert, excludeExtMap)
+			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors,invert, excludeExtMap, extMap)
 		} else {
 			grepSearch(args[0], args[1], binary,invert)
 		}
@@ -77,10 +82,11 @@ func init() {
 	rootCmd.Flags().BoolP("ignore-errors", "i", false, "Ignore all errors")
 	rootCmd.Flags().BoolP("invert", "v", false, "Returns all lines that do not match the pattern")
 	rootCmd.Flags().StringSliceP("exclude-ext", "X", []string{}, "Exclude Extensions from the search. Only works in recursive mode")
+	rootCmd.Flags().StringSliceP("ext", "x", []string{}, "Only include certain extensions. Only works in recursive mode")	
 
 }
 
-func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool) {
+func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool, extMap map[string]bool) {
 	resChan := make(chan string)
 	guard := make(chan struct{}, 128)
 
@@ -93,6 +99,9 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 		}
 		if info.IsDir() && (filepath.Base(path)[0] == '.' && !hidden) && filepath.Base(path) != "." {
 			return filepath.SkipDir
+		}
+		if (len(extMap) > 0 && extMap[filepath.Ext(path)]) {
+			return nil
 		}
 		if (excludeExtMap[filepath.Ext(path)]) {
 			return nil
