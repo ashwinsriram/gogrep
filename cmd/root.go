@@ -149,7 +149,12 @@ func grepSearch(search string, file string, binary bool, invert bool, regex bool
 
 	for fileScanner.Scan() {
 		ln++
-		if (((regex && r.MatchString(fileScanner.Text()) == !invert) || (!regex && strings.Contains(fileScanner.Text(), search) == !invert)) && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		regexMatch := regex && r.MatchString(fileScanner.Text()) == !invert
+		stringMatch := !regex && strings.Contains(fileScanner.Text(), search) == !invert
+		validString := len(fileScanner.Text()) > 0
+		validBinary := utf8.ValidString(fileScanner.Text()) || binary
+		match := ((regexMatch || stringMatch) && validString) && validBinary
+		if match {
 			fmt.Printf("%v: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
@@ -179,7 +184,12 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 
 	for fileScanner.Scan() {
 		ln++
-		if (((regex && r.MatchString(fileScanner.Text()) == !invert) || (!regex && strings.Contains(fileScanner.Text(), search) == !invert)) && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
+		regexMatch := regex && r.MatchString(fileScanner.Text()) == !invert
+		stringMatch := !regex && strings.Contains(fileScanner.Text(), search) == !invert
+		validString := len(fileScanner.Text()) > 0
+		validBinary := utf8.ValidString(fileScanner.Text()) || binary
+		match := ((regexMatch || stringMatch) && validString) && validBinary
+		if match {
 			res.WriteString(fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln))))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
