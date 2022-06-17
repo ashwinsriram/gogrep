@@ -44,6 +44,7 @@ to quickly create a Cobra application.`,
 		ext, _ := cmd.Flags().GetStringSlice("ext")
 		excludeDir, _ := cmd.Flags().GetStringSlice("exclude-dir")
 		regex, _ := cmd.Flags().GetBool("regex")
+		ignoreCase, _ := cmd.Flags().GetBool("ignore-case")
 
 		excludeExtMap := make(map[string]bool)
 		for _, exclude := range excludeExt {
@@ -58,9 +59,9 @@ to quickly create a Cobra application.`,
 			excludeDirMap[exclude] = true
 		}
 		if recursive {
-			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors, invert, excludeExtMap, extMap, excludeDirMap, regex)
+			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors, invert, excludeExtMap, extMap, excludeDirMap, regex, ignoreCase)
 		} else {
-			grepSearch(args[0], args[1], binary, invert, regex)
+			grepSearch(args[0], args[1], binary, invert, regex, ignoreCase)
 		}
 
 	},
@@ -93,9 +94,10 @@ func init() {
 	rootCmd.Flags().StringSliceP("ext", "x", []string{}, "Only include certain extensions. Only works in recursive mode")
 	rootCmd.Flags().StringSliceP("exclude-dir", "D", []string{}, "Exclude directories from the search. Only works in recursive mode")
 	rootCmd.Flags().BoolP("regex", "e", false, "Use regex to search for a string")
+	rootCmd.Flags().BoolP("ignore-case", "c", false, "Ignore case when looking for a match. Can not be used in conjunction with regex")
 }
 
-func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool, extMap map[string]bool, excludeDirMap map[string]bool, regex bool) {
+func recursiveSearch(search string, dir string, hidden bool, binary bool, ignoreErrors bool, invert bool, excludeExtMap map[string]bool, extMap map[string]bool, excludeDirMap map[string]bool, regex bool, ignoreCase bool) {
 	resChan := make(chan string)
 	guard := make(chan struct{}, 128)
 
@@ -123,7 +125,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 			wgGrep.Add(1)
 			wgPrint.Add(1)
 			guard <- struct{}{}
-			go recursiveGrep(search, path, binary, resChan, guard, invert, regex)
+			go recursiveGrep(search, path, binary, resChan, guard, invert, regex, ignoreCase)
 			go recursivePrint(path, resChan)
 		}
 		return nil
@@ -137,7 +139,7 @@ func recursiveSearch(search string, dir string, hidden bool, binary bool, ignore
 }
 
 //search for a string in a file and return the line number and line with the string highlighted
-func grepSearch(search string, file string, binary bool, invert bool, regex bool) {
+func grepSearch(search string, file string, binary bool, invert bool, regex bool, ignoreCase bool) {
 	//open the file
 	f, _ := os.Open(file)
 	defer f.Close()
@@ -149,11 +151,19 @@ func grepSearch(search string, file string, binary bool, invert bool, regex bool
 
 	for fileScanner.Scan() {
 		ln++
-		regexMatch := regex && r.MatchString(fileScanner.Text()) == !invert
-		stringMatch := !regex && strings.Contains(fileScanner.Text(), search) == !invert
+		var stringMatch bool
+		if regex {
+			stringMatch = regex && r.MatchString(fileScanner.Text()) == !invert
+		} else {
+			if ignoreCase {
+				stringMatch = strings.Contains(strings.ToLower(fileScanner.Text()), strings.ToLower(search)) == !invert
+			} else {
+				stringMatch = strings.Contains(fileScanner.Text(), search) == !invert
+			}
+		}
 		validString := len(fileScanner.Text()) > 0
 		validBinary := utf8.ValidString(fileScanner.Text()) || binary
-		match := ((regexMatch || stringMatch) && validString) && validBinary
+		match := (stringMatch && validString) && validBinary
 		if match {
 			fmt.Printf("%v: ", color.GreenString(strconv.Itoa(ln)))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
@@ -170,7 +180,7 @@ func grepSearch(search string, file string, binary bool, invert bool, regex bool
 
 }
 
-func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}, invert bool, regex bool) {
+func recursiveGrep(search string, file string, binary bool, resChan chan string, guard chan struct{}, invert bool, regex bool, ignoreCase bool) {
 	defer wgGrep.Done()
 	defer func() { <-guard }()
 	//open the file
@@ -184,11 +194,19 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 
 	for fileScanner.Scan() {
 		ln++
-		regexMatch := regex && r.MatchString(fileScanner.Text()) == !invert
-		stringMatch := !regex && strings.Contains(fileScanner.Text(), search) == !invert
+		var stringMatch bool
+		if regex {
+			stringMatch = regex && r.MatchString(fileScanner.Text()) == !invert
+		} else {
+			if ignoreCase {
+				stringMatch = strings.Contains(strings.ToLower(fileScanner.Text()), strings.ToLower(search)) == !invert
+			} else {
+				stringMatch = strings.Contains(fileScanner.Text(), search) == !invert
+			}
+		}
 		validString := len(fileScanner.Text()) > 0
 		validBinary := utf8.ValidString(fileScanner.Text()) || binary
-		match := ((regexMatch || stringMatch) && validString) && validBinary
+		match := (stringMatch && validString) && validBinary
 		if match {
 			res.WriteString(fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln))))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
