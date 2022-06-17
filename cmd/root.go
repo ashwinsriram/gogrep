@@ -173,31 +173,33 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 	fileScanner := bufio.NewScanner(f)
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
-	res := color.GreenString(file) + "\n"
+	var res strings.Builder
+	res.WriteString(color.GreenString(file) + "\n")
 	r, _ := regexp.Compile(search)
 
 	for fileScanner.Scan() {
 		ln++
 		if (((regex && r.MatchString(fileScanner.Text()) == !invert) || (!regex && strings.Contains(fileScanner.Text(), search) == !invert)) && len(fileScanner.Text()) > 0) && (utf8.ValidString(fileScanner.Text()) || binary) {
-			res += fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln)))
+			res.WriteString(fmt.Sprintf("%s: ", color.GreenString(strconv.Itoa(ln))))
 			line := strings.Split(strings.TrimSpace(fileScanner.Text()), search)
 			numParts := len(line) - 1
 			for idx, part := range line {
-				res += fmt.Sprint(part)
+				res.WriteString(fmt.Sprint(part))
 				if idx < numParts {
-					res += color.RedString(search)
+					res.WriteString(color.RedString(search))
 				}
 			}
-			res += "\n"
+			res.WriteString("\n")
 		}
 	}
 	f.Close()
-	if len(strings.Split(res, "\n")) == 2 {
-		res = ""
+	if len(strings.Split(res.String(), "\n")) == 2 {
+		resChan <- ""
 	} else {
-		res += "\n"
+		res.WriteString("\n")
+		resChan <- res.String()
 	}
-	resChan <- res
+	
 }
 
 func recursivePrint(path string, resChan chan string) {
