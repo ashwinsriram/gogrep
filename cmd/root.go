@@ -61,7 +61,11 @@ to quickly create a Cobra application.`,
 		if recursive {
 			recursiveSearch(args[0], args[1], hidden, binary, ignoreErrors, invert, excludeExtMap, extMap, excludeDirMap, regex, ignoreCase)
 		} else {
-			grepSearch(args[0], args[1], binary, invert, regex, ignoreCase)
+			if len(args) == 1 {
+				grepSearch(args[0], "stdin", binary, invert, regex, ignoreCase)
+			} else {
+				grepSearch(args[0], args[1], binary, invert, regex, ignoreCase)
+			}
 		}
 
 	},
@@ -143,7 +147,12 @@ func grepSearch(search string, file string, binary bool, invert bool, regex bool
 	//open the file
 	f, _ := os.Open(file)
 	defer f.Close()
-	fileScanner := bufio.NewScanner(f)
+	var fileScanner *bufio.Scanner
+	if file == "stdin" {
+		fileScanner = bufio.NewScanner(os.Stdin)
+	} else {
+		fileScanner = bufio.NewScanner(f)
+	}
 	fileScanner.Split(bufio.ScanLines)
 	ln := 0
 
@@ -227,7 +236,7 @@ func recursiveGrep(search string, file string, binary bool, resChan chan string,
 		res.WriteString("\n")
 		resChan <- res.String()
 	}
-	
+
 }
 
 func recursivePrint(path string, resChan chan string) {
